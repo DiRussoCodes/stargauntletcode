@@ -19,30 +19,42 @@ kml = """<?xml version="1.0" encoding="UTF-8"?>
 totalStars = 100
 kmWide = 250
 
-def getCoordsInUS():
+def getCoordsOnLand():
     # grab shape within which to sample
-    url = "cb_2018_us_nation_20m.zip"
-    us = gpd.read_file(url).explode()
+    url = "ne_10m_admin_0_countries.zip"
+    world = gpd.read_file(url).explode()
+    land = world.dissolve().geometry.iloc[0]
     ## filter out parts of the US that east of PR (no guam etc)
     #us = us.loc[us.geometry.apply(lambda x: x.exterior.bounds[2])<-60]
 
     # grab bounding box within which to generate random numbers
-    x_min,y_min,x_max,y_max = us.geometry.union_all().bounds
+    x_min,y_min,x_max,y_max = -180, -90, 180, 90
     #print(x_min, y_min, x_max, y_max)
 
-    # the sampling
-    N = (totalStars * 22) # enough points to reliably meet the desired number
-    rndn_sample = pd.DataFrame({'x':np.random.uniform(x_min,x_max,N),'y':generateLats(y_min,y_max,N)}) # actual generation
-    # re-save results in a geodataframe
-    rndn_sample = gpd.GeoDataFrame(rndn_sample, geometry = gpd.points_from_xy(x=rndn_sample.x, y=rndn_sample.y),crs = us.crs)
+    # Generate random global points
+    N = totalStars * 30  # oversample so we can filter effectively
+    rndn_sample = pd.DataFrame({
+        'x': np.random.uniform(x_min, x_max, N),
+        'y': np.random.uniform(y_min, y_max, N)
+    })
+    
+    # Convert to GeoDataFrame
+    rndn_sample = gpd.GeoDataFrame(
+        rndn_sample,
+        geometry=gpd.points_from_xy(x=rndn_sample.x, y=rndn_sample.y),
+        crs="EPSG:4326"
+    )
 
-    # filtering
-    inUS = rndn_sample['geometry'].apply(lambda s: s.within(us.geometry.union_all())) # check if within the U.S. bounds
+    # Filter points that are on land (not in the ocean)
+    inLand = rndn_sample.geometry.within(land)
     global points
-    points = rndn_sample.loc[inUS,:].geometry
-    #print(type(points))
-    #for x in points:
-        #print(x.x, x.y)
+    points = rndn_sample.loc[inLand, "geometry"]
+
+    # Downsample to exactly totalStars points
+    if len(points) > totalStars:
+        points = points.sample(totalStars)
+    
+    print(f"{len(points)} coordinates generated on land (out of {N} random points)")
 
 def generateLats(y_min,y_max,N):
     i = 0
